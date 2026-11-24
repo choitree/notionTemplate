@@ -320,3 +320,14 @@ tfoot td { font-weight: 700; border-bottom: 0; }
 .small { font-size: 12px; }
 .mt { margin-top: 16px; }
 .right { margin-left: auto; }
+
+/* ---------- 계정 / 동기화 ---------- */
+.account-btn[hidden] { display: none; }
+.account-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; max-width: 140px; }
+.account-btn .acct-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sync-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; background: var(--muted); vertical-align: 1px; }
+.sync-dot.synced { background: var(--good); }
+.sync-dot.syncing, .sync-dot.pending { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.sync-dot.offline, .sync-dot.error { background: var(--warning); }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .sync-dot { animation: none !important; } }
