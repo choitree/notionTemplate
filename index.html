@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>가계부 캘린더</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <script>
+      try {
+        const t = localStorage.getItem('gagyebu-theme');
+        if (t) document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand"><span class="brand-mark">₩</span>가계부 캘린더</div>
+        <nav class="nav" id="nav">
+          <a href="#/dashboard" data-view="dashboard">대시보드</a>
+          <a href="#/ledger" data-view="ledger">가계부</a>
+          <a href="#/calendar" data-view="calendar">캘린더</a>
+          <a href="#/recurring" data-view="recurring">고정비 분석</a>
+          <a href="#/events" data-view="events">여행·일정</a>
+          <a href="#/data" data-view="data">데이터</a>
+        </nav>
+        <form class="search" id="search-form">
+          <input type="search" id="search-input" placeholder="검색 (예: 여행, 2025 여행, 제주)" aria-label="검색" />
+          <button type="button" class="icon-btn" id="theme-btn" title="화면 테마 전환" aria-label="화면 테마 전환"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"/></svg></button>
+        </form>
+      </div>
+    </header>
+    <main id="view"></main>
+    <div id="modal-root"></div>
+
+    <script src="js/vendor/chart.umd.min.js"></script>
+    <script src="js/analytics.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/sample.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>
