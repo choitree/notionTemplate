@@ -1,7 +1,9 @@
 # 가계부 캘린더
 
-가계부와 캘린더를 합친 개인용 웹앱입니다. 설치도 서버도 필요 없이 `index.html`을 브라우저로 열면 바로 쓸 수 있습니다.
-데이터는 그 브라우저의 localStorage에만 저장되며, CSV·JSON으로 백업할 수 있습니다.
+가계부와 캘린더를 합친 개인용 웹앱입니다. 설치 없이 `index.html`을 브라우저로 열면 바로 쓸 수 있습니다.
+
+- **로그인 없이**: 데이터는 그 브라우저(localStorage)에만 저장되며, CSV·JSON으로 백업할 수 있습니다.
+- **로그인하면**: 계정별로 서버(Supabase)에 저장되어 휴대폰·PC 어디서나 같은 데이터를 씁니다. 사용자끼리는 서로의 데이터를 볼 수 없습니다.
 
 ## 기능
 
@@ -65,16 +67,42 @@ main 브랜치에 푸시하면 `.github/workflows/pages.yml`이 테스트를 돌
 - 여행을 추가할 때 **기간 중 지출 자동 연결**을 켜면 그 기간의 지출(고정비 제외, 주유비 포함)이 여행에 연결됩니다.
 - 항공권·숙소처럼 미리 결제한 지출은 거래 입력 시 **여행·일정 연결**에서 직접 선택하세요.
 
+## 로그인·동기화 설정 (Supabase)
+
+`js/config.js`가 비어 있으면 로그인 버튼이 숨겨지고 브라우저 저장 모드로만 동작합니다. 로그인을 켜려면:
+
+1. [supabase.com](https://supabase.com)에서 무료 프로젝트를 만듭니다.
+2. **SQL Editor**에 [`supabase/schema.sql`](supabase/schema.sql) 내용을 붙여넣고 **Run** — `ledgers` 테이블과 “본인 행만 읽기·쓰기” 보안 규칙(RLS)이 만들어집니다.
+3. **Authentication → URL Configuration**
+   - Site URL: `https://choitree.github.io/notionTemplate/`
+   - Redirect URLs: 위 주소 (로컬에서 테스트하려면 `http://localhost:8000/`도 추가)
+4. **Project Settings → API**에서 *Project URL*과 *anon(publishable) key*를 복사해 `js/config.js`에 넣고 main에 푸시합니다.
+   - anon 키는 브라우저에 공개되는 키라 커밋해도 됩니다. 데이터 보호는 2번의 RLS 규칙이 담당합니다.
+   - **service_role 키는 절대 넣지 마세요.**
+
+로그인 방식은 이메일+비밀번호와 이메일 링크(비밀번호 없이 로그인, 비밀번호를 잊었을 때도 사용) 두 가지입니다. Supabase 기본 설정에서는 가입 시 인증 메일을 눌러야 가입이 끝납니다. 기본 메일 발송은 시간당 횟수 제한이 있으니, 사용자가 많아지면 Authentication → SMTP에 자체 메일 서버를 연결하세요.
+
+### 동기화 방식
+
+- 사용자마다 `ledgers` 테이블에 행 하나(가계부 전체 JSON)를 저장하고, 고칠 때마다 1~2초 뒤 자동 저장합니다.
+- 두 기기에서 동시에 고치면 거래·일정·카테고리마다 더 최근에 바뀐 쪽을 골라 합칩니다. 삭제도 기록해 두어 지운 항목이 되살아나지 않습니다.
+- 창으로 돌아오거나 인터넷이 다시 연결되면 다른 기기의 변경을 가져옵니다. 오프라인에서 입력한 내용은 연결되면 올라갑니다.
+- 로그인 전에 이 브라우저에 입력한 데이터가 있으면, 로그인할 때 계정에 합칠지 묻습니다.
+- 로그아웃하면 이 브라우저에 남은 계정 데이터 사본을 지웁니다 (서버에는 그대로 남음). 공용 PC에서 쓰기 좋습니다.
+
 ## 구조
 
 ```
 index.html
 css/style.css
 js/analytics.js   분석 로직 (월·연 합계, 고정비 판정, 일정 요약, 검색) — 순수 함수
-js/store.js       저장소 (localStorage, CSV/JSON 가져오기·내보내기)
+js/store.js       저장소 (localStorage, 사용자별 캐시, CSV/JSON 가져오기·내보내기)
+js/sync.js        로그인·클라우드 동기화 (Supabase, 기기 간 변경 합치기)
+js/config.js      Supabase 주소·공개 키 (비우면 로그인 꺼짐)
+supabase/         데이터베이스 스키마·보안 규칙
 js/sample.js      샘플 데이터 생성기
 js/app.js         화면 (대시보드·가계부·캘린더·고정비·여행·검색·데이터)
-js/vendor/        Chart.js 4.4.1 (MIT)
+js/vendor/        Chart.js 4.4.1 (MIT), supabase-js 2.118.0 (MIT)
 tests/            node --test tests/*.test.js
 ```
 

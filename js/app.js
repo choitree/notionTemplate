@@ -161,6 +161,12 @@
 
   function parseHash() {
     const h = location.hash.replace(/^#\/?/, '');
+    // 이메일 인증·로그인 링크로 돌아온 경우 (#access_token=… / #error=…)
+    if (/(^|&)(access_token|error|error_description)=/.test(h)) {
+      const p = new URLSearchParams(h);
+      if (p.get('error_description')) setTimeout(() => toast(`로그인 실패: ${p.get('error_description')}`), 0);
+      return { view: 'dashboard', params: new URLSearchParams() };
+    }
     const [view, qs] = h.split('?');
     const params = new URLSearchParams(qs || '');
     return { view: view || 'dashboard', params };
@@ -305,10 +311,17 @@
         <li>월별·연도별 지출과 <b>전년·전전년 비교 그래프</b></li>
         <li>가스비·수도비·주유비 등 <b>고정비의 계절 패턴</b>과 이상 급등 감지</li>
         <li>“여행” 검색 한 번으로 <b>언제·어디로·며칠·얼마</b>를 한눈에</li>
-        <li>데이터는 이 브라우저에만 저장됩니다 (CSV/JSON 백업 지원)</li>
+        <li>${
+          Auth.user
+            ? `<b>${esc(Auth.user.email)}</b> 계정에 저장되어 여러 기기에서 동기화됩니다`
+            : Auth.enabled
+              ? '로그인하면 여러 기기에서 같은 데이터를 쓸 수 있습니다 (로그인 없이도 이 브라우저에 저장)'
+              : '데이터는 이 브라우저에만 저장됩니다 (CSV/JSON 백업 지원)'
+        }</li>
       </ul>
       <div class="row" style="justify-content:center;margin-top:12px">
-        <button class="btn primary" id="w-sample">샘플 데이터로 체험하기</button>
+        ${Auth.enabled && !Auth.user ? '<button class="btn primary" id="w-login">로그인 / 회원가입</button>' : ''}
+        <button class="btn ${Auth.enabled && !Auth.user ? '' : 'primary'}" id="w-sample">샘플 데이터로 체험하기</button>
         <button class="btn" id="w-tx">첫 거래 입력하기</button>
         <a class="btn" href="#/data" style="text-decoration:none">CSV 가져오기</a>
       </div>
@@ -319,12 +332,17 @@
       render();
     };
     $('#w-tx').onclick = () => openTxForm();
+    if ($('#w-login')) $('#w-login').onclick = () => openLoginModal();
   }
 
   /* =========================================================
    * 대시보드
    * ======================================================= */
   VIEWS.dashboard = function (root) {
+    if (isEmpty() && Auth.user && Auth.status === 'syncing') {
+      root.innerHTML = '<div class="card empty">계정 데이터를 불러오는 중…</div>';
+      return;
+    }
     if (isEmpty()) return welcome(root);
     const Y = UI.year;
     const isCur = Y === CUR_Y;
@@ -996,7 +1014,10 @@
     const counts = new Map();
     d.transactions.forEach((t) => counts.set(t.category, (counts.get(t.category) || 0) + 1));
     root.innerHTML = `
-      <div class="page-head"><div><h1>데이터</h1><div class="sub">거래 ${d.transactions.length.toLocaleString()}건 · 일정 ${d.events.length}건 · 이 브라우저(localStorage)에 저장됨</div></div></div>
+      <div class="page-head"><div><h1>데이터</h1><div class="sub">거래 ${d.transactions.length.toLocaleString()}건 · 일정 ${d.events.length}건 · ${
+        Auth.user ? `${esc(Auth.user.email)} 계정에 동기화` : '이 브라우저(localStorage)에 저장됨'
+      }</div></div></div>
+      ${accountCard()}
       <div class="grid grid-2">
         <div class="card">
           <h2>CSV 가져오기</h2>
@@ -1013,7 +1034,7 @@
           <p class="hint">JSON 백업에는 거래·일정·카테고리·설정이 모두 들어갑니다</p>
           <div class="row"><button class="btn" id="json-export">JSON 백업 저장</button><label class="btn">JSON 복원<input type="file" id="json-file" accept=".json,application/json" hidden /></label></div>
           <div class="row mt"><button class="btn" id="sample">샘플 데이터 불러오기</button><button class="btn danger" id="reset">모든 데이터 삭제</button></div>
-          <h2 class="mt">이상 감지 기준</h2>
+          <h2 style="margin-top:20px">이상 감지 기준</h2>
           <p class="hint">예상치(같은 달 예년 평균, 추세 보정) 대비 초과 비율</p>
           <div class="row">
             <label class="small">주의 <input type="number" id="set-warn" min="1" max="200" value="${Math.round(s.warn * 100)}" style="width:70px" />%</label>
@@ -1039,6 +1060,7 @@
         </table></div>
       </div>`;
 
+    bindAccountCard(root);
     $('#csv-file').onchange = async (e) => {
       const f = e.target.files[0];
       if (!f) return;
@@ -1052,7 +1074,7 @@
     $('#json-file').onchange = async (e) => {
       const f = e.target.files[0];
       if (!f) return;
-      if (!confirm('현재 데이터를 백업 파일 내용으로 바꿉니다. 계속할까요?')) return;
+      if (!confirm(`현재 데이터를 백업 파일 내용으로 바꿉니다.${Auth.user ? ' 계정의 다른 기기에도 반영됩니다.' : ''} 계속할까요?`)) return;
       try {
         Store.importJSON(await f.text());
         toast('복원했습니다.');
@@ -1068,7 +1090,8 @@
       rerender();
     };
     $('#reset').onclick = () => {
-      if (!confirm('모든 거래·일정을 삭제합니다. 먼저 백업을 권장합니다. 삭제할까요?')) return;
+      const where = Auth.user ? ' 계정에 저장된 데이터와 다른 기기의 데이터도 함께 삭제됩니다.' : '';
+      if (!confirm(`모든 거래·일정을 삭제합니다.${where} 먼저 백업을 권장합니다. 삭제할까요?`)) return;
       Store.reset();
       toast('초기화했습니다.');
       go('dashboard');
@@ -1077,8 +1100,7 @@
       const w = Number($('#set-warn').value) / 100;
       const a = Number($('#set-alert').value) / 100;
       if (!(w > 0) || !(a > w)) return toast('경고 기준은 주의 기준보다 커야 합니다.');
-      Object.assign(Store.data.settings, { warn: w, alert: a, lookback: Number($('#set-lookback').value) });
-      Store.save();
+      Store.updateSettings({ warn: w, alert: a, lookback: Number($('#set-lookback').value) });
       toast('기준을 저장했습니다.');
     };
     ['#set-warn', '#set-alert', '#set-lookback'].forEach((sel) => ($(sel).onchange = saveSettings));
@@ -1322,9 +1344,216 @@
   }
 
   /* =========================================================
+   * 로그인 · 동기화
+   * ======================================================= */
+  const CONFIG = window.GAGYEBU_CONFIG || {};
+  const STATUS_TEXT = {
+    guest: '로그인 안 됨',
+    pending: '저장 대기',
+    syncing: '동기화 중…',
+    synced: '동기화됨',
+    offline: '오프라인 · 연결되면 저장',
+    error: '오류',
+  };
+  const Auth = {
+    enabled: !!(CONFIG.supabaseUrl && CONFIG.supabaseAnonKey && window.supabase && window.Sync),
+    sync: null,
+    get user() {
+      return this.sync ? this.sync.user : null;
+    },
+    get status() {
+      return this.sync ? this.sync.status : 'guest';
+    },
+  };
+
+  function accountButton() {
+    const btn = $('#account-btn');
+    if (!btn) return;
+    btn.hidden = !Auth.enabled;
+    if (!Auth.enabled) return;
+    const u = Auth.user;
+    const st = Auth.status;
+    btn.className = `btn small account-btn ${u ? 'in' : ''}`;
+    btn.innerHTML = u
+      ? `<span class="sync-dot ${st}" aria-hidden="true"></span><span class="acct-name">${esc(u.email.split('@')[0])}</span>`
+      : '로그인';
+    btn.title = u ? `${u.email} · ${STATUS_TEXT[st] || st}` : '로그인하고 여러 기기에서 동기화';
+    btn.setAttribute('aria-label', btn.title);
+  }
+
+  function accountCard() {
+    if (!Auth.enabled) {
+      return `<div class="card" style="margin-bottom:16px"><h2>계정</h2><p class="hint" style="margin:0">로그인 기능이 설정되지 않아 이 브라우저에만 저장합니다. 설정 방법은 README의 “로그인·동기화 설정”을 참고하세요.</p></div>`;
+    }
+    const u = Auth.user;
+    if (!u) {
+      return `<div class="card" style="margin-bottom:16px"><div class="card-head" style="flex-wrap:wrap;margin:0"><div><h2>계정</h2><p class="hint" style="margin:0">로그인하지 않아 이 브라우저에만 저장 중입니다. 로그인하면 여러 기기에서 같은 데이터를 쓸 수 있습니다.</p></div><button class="btn primary" id="acct-login">로그인 / 회원가입</button></div></div>`;
+    }
+    return `<div class="card" style="margin-bottom:16px"><div class="card-head" style="flex-wrap:wrap;margin:0">
+      <div><h2>계정 · ${esc(u.email)}</h2>
+        <p class="hint" style="margin:0" id="acct-status">${acctStatusHtml()}</p></div>
+      <div class="row"><button class="btn" id="acct-sync">지금 동기화</button><button class="btn" id="acct-logout">로그아웃</button></div>
+    </div></div>`;
+  }
+  function acctStatusHtml() {
+    const st = Auth.status;
+    const last = Auth.sync && Auth.sync.lastSynced;
+    const err = Auth.sync && Auth.sync.lastError;
+    return `<span class="sync-dot ${st}"></span> ${esc(STATUS_TEXT[st] || st)}${last ? ` · 마지막 동기화 ${last.toLocaleTimeString('ko-KR')}` : ''}${err && st !== 'synced' ? ` · ${esc(err)}` : ''}`;
+  }
+  function bindAccountCard(root) {
+    const l = $('#acct-login', root);
+    if (l) l.onclick = () => openLoginModal();
+    const sy = $('#acct-sync', root);
+    if (sy) sy.onclick = () => Auth.sync.pull().then(() => toast(STATUS_TEXT[Auth.status] || Auth.status));
+    const lo = $('#acct-logout', root);
+    if (lo) lo.onclick = () => doLogout();
+  }
+
+  async function doLogout() {
+    const ok = await Auth.sync.signOut();
+    if (!ok) return;
+    closeModal();
+    toast('로그아웃했습니다. 이 브라우저에서 계정 데이터를 지웠습니다.');
+    go('dashboard');
+    rerender();
+  }
+
+  function openAccountModal() {
+    const u = Auth.user;
+    const m = openModal(`
+      <div class="card-head"><h2 style="margin:0">계정</h2><button class="icon-btn" id="am-close" aria-label="닫기">✕</button></div>
+      <p style="margin:4px 0 2px"><b>${esc(u.email)}</b></p>
+      <p class="muted small" style="margin:0 0 14px"><span class="sync-dot ${Auth.status}"></span> ${esc(STATUS_TEXT[Auth.status] || Auth.status)}${Auth.sync.lastError ? ` · ${esc(Auth.sync.lastError)}` : ''}</p>
+      <p class="muted small">거래 ${data().transactions.length.toLocaleString()}건 · 일정 ${data().events.length}건이 이 계정에 저장되어 있습니다. 다른 기기에서 같은 이메일로 로그인하면 같은 데이터가 보입니다.</p>
+      <div class="modal-foot"><button class="btn" id="am-sync">지금 동기화</button><button class="btn primary" id="am-logout">로그아웃</button></div>`);
+    $('#am-close', m).onclick = closeModal;
+    $('#am-sync', m).onclick = async () => {
+      await Auth.sync.pull();
+      closeModal();
+      toast(STATUS_TEXT[Auth.status] || Auth.status);
+    };
+    $('#am-logout', m).onclick = () => doLogout();
+  }
+
+  function openLoginModal(mode = 'login') {
+    let tab = mode;
+    const m = openModal(`
+      <div class="card-head"><h2 style="margin:0">로그인</h2><button class="icon-btn" id="lg-close" aria-label="닫기">✕</button></div>
+      <p class="muted small" style="margin:4px 0 14px">로그인하면 가계부가 계정에 저장되어 휴대폰·PC 어디서나 같은 데이터를 볼 수 있습니다. 다른 사용자는 내 데이터를 볼 수 없습니다.</p>
+      <div class="seg" id="lg-tab" style="margin-bottom:12px"><button type="button" data-t="login">로그인</button><button type="button" data-t="signup">회원가입</button><button type="button" data-t="link">이메일 링크</button></div>
+      <form class="form" id="lg-form">
+        <label>이메일<input type="email" name="email" autocomplete="email" required /></label>
+        <label id="lg-pw-wrap">비밀번호<input type="password" name="password" minlength="6" autocomplete="current-password" /></label>
+        <p class="small muted" id="lg-help" style="margin:0"></p>
+        <p class="small" id="lg-msg" role="status" style="margin:0"></p>
+        <div class="modal-foot"><span></span><button type="submit" class="btn primary" id="lg-submit">로그인</button></div>
+      </form>`);
+    const form = $('#lg-form', m);
+    const msg = $('#lg-msg', m);
+    const sync = () => {
+      $$('#lg-tab button', m).forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
+      $('#lg-pw-wrap', m).style.display = tab === 'link' ? 'none' : '';
+      form.password.required = tab !== 'link';
+      form.password.autocomplete = tab === 'signup' ? 'new-password' : 'current-password';
+      $('#lg-submit', m).textContent = { login: '로그인', signup: '가입하기', link: '로그인 링크 받기' }[tab];
+      $('#lg-help', m).textContent = {
+        login: '',
+        signup: '비밀번호는 6자 이상. 가입 후 인증 메일이 오면 링크를 눌러 완료하세요.',
+        link: '비밀번호 없이, 이메일로 받은 링크를 눌러 로그인합니다. 비밀번호를 잊었을 때도 쓸 수 있습니다.',
+      }[tab];
+      msg.textContent = '';
+    };
+    sync();
+    $$('#lg-tab button', m).forEach((b) =>
+      b.addEventListener('click', () => {
+        tab = b.dataset.t;
+        sync();
+      })
+    );
+    $('#lg-close', m).onclick = closeModal;
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = form.email.value.trim();
+      const password = form.password.value;
+      const btn = $('#lg-submit', m);
+      btn.disabled = true;
+      msg.style.color = 'var(--ink-2)';
+      msg.textContent = '처리 중…';
+      try {
+        if (tab === 'login') {
+          await Auth.sync.signIn(email, password);
+          closeModal();
+          toast('로그인했습니다.');
+        } else if (tab === 'signup') {
+          const r = await Auth.sync.signUp(email, password);
+          if (r.needsConfirm) {
+            msg.style.color = 'var(--good-ink)';
+            msg.textContent = `${email}로 인증 메일을 보냈습니다. 메일의 링크를 누르면 가입이 완료되고 자동으로 로그인됩니다.`;
+          } else {
+            closeModal();
+            toast('가입하고 로그인했습니다.');
+          }
+        } else {
+          await Auth.sync.sendMagicLink(email);
+          msg.style.color = 'var(--good-ink)';
+          msg.textContent = `${email}로 로그인 링크를 보냈습니다. 이 기기에서 메일의 링크를 눌러 주세요.`;
+        }
+      } catch (err) {
+        msg.style.color = 'var(--critical)';
+        msg.textContent = err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
+  function startAuth() {
+    accountButton();
+    if (!Auth.enabled) return;
+    const client = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'implicit' },
+    });
+    Auth.sync = window.Sync.createSync({
+      client,
+      store: Store,
+      hooks: {
+        onStatus: () => {
+          accountButton();
+          const el = $('#acct-status');
+          if (el) el.innerHTML = acctStatusHtml();
+        },
+        onUser: () => accountButton(),
+        onRemoteData: debounce(() => {
+          if (!$('.modal-bg')) rerender();
+        }, 50),
+        confirm: (message) => Promise.resolve(window.confirm(message)),
+      },
+    });
+    $('#account-btn').addEventListener('click', () => (Auth.user ? openAccountModal() : openLoginModal()));
+    Auth.sync.start().catch((e) => console.warn('로그인 초기화 실패', e));
+    // 다른 기기에서 바꾼 내용 가져오기
+    const pull = debounce(() => Auth.sync.pull(), 300);
+    window.addEventListener('focus', pull);
+    window.addEventListener('online', pull);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') pull();
+      else Auth.sync.flush();
+    });
+    window.addEventListener('beforeunload', (e) => {
+      if (Auth.sync.dirty) {
+        Auth.sync.flush();
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+  }
+
+  /* =========================================================
    * 시작
    * ======================================================= */
   Store.load();
+  startAuth();
   $('#search-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const q = $('#search-input').value.trim();

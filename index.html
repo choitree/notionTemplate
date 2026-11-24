@@ -27,6 +27,7 @@
         <form class="search" id="search-form">
           <input type="search" id="search-input" placeholder="검색 (예: 여행, 2025 여행, 제주)" aria-label="검색" />
           <button type="button" class="icon-btn" id="theme-btn" title="화면 테마 전환" aria-label="화면 테마 전환"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"/></svg></button>
+          <button type="button" class="btn small account-btn" id="account-btn" hidden>로그인</button>
         </form>
       </div>
     </header>
@@ -34,9 +35,12 @@
     <div id="modal-root"></div>
 
     <script src="js/vendor/chart.umd.min.js"></script>
+    <script src="js/vendor/supabase.js"></script>
+    <script src="js/config.js"></script>
     <script src="js/analytics.js"></script>
     <script src="js/store.js"></script>
     <script src="js/sample.js"></script>
+    <script src="js/sync.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>
