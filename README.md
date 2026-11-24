@@ -42,7 +42,7 @@ python3 -m http.server 8000   # → http://localhost:8000
 처음 열면 **샘플 데이터로 체험하기**를 눌러 최근 3년치 예시 데이터(여행 6건, 의도적으로 넣은 고정비 이상 2건)를 볼 수 있습니다.
 실제로 사용하려면 **데이터 → 모든 데이터 삭제** 후 입력하거나 CSV를 가져오세요.
 
-GitHub Pages(Settings → Pages → 브랜치 선택)로 올리면 휴대폰에서도 열 수 있습니다. 단, 데이터는 기기·브라우저마다 따로 저장됩니다.
+main 브랜치에 푸시하면 `.github/workflows/pages.yml`이 테스트를 돌린 뒤 GitHub Pages로 배포합니다(저장소 Settings → Pages → Source를 **GitHub Actions**로 설정 필요). 휴대폰에서도 열 수 있지만 데이터는 기기·브라우저마다 따로 저장됩니다.
 
 ### CSV 형식
 
