@@ -108,7 +108,8 @@ test('CSV 가져오기: 헤더 별칭, 음수 금액, 따옴표, 새 카테고�
 test('CSV 내보내기 → 다시 가져오기 왕복', () => {
   const data = Sample.generate(new Date(2026, 10, 24));
   const csv = Store.transactionsToCSV(data);
-  const res = Store.csvToTransactions(csv, data);
+  const target = { ...Store.emptyData(), events: data.events }; // 일정 이름으로 연결되는지 확인
+  const res = Store.csvToTransactions(csv, target);
   assert.equal(res.errors.length, 0);
   assert.equal(res.transactions.length, data.transactions.length);
   const sum = (arr) => arr.reduce((s, t) => s + t.amount, 0);
