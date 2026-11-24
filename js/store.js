@@ -3,9 +3,9 @@
  * CSV/JSON 가져오기·내보내기 포함.
  */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.Store = factory();
-})(typeof self !== 'undefined' ? self : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./importer.js'));
+  else root.Store = factory(root.Importer);
+})(typeof self !== 'undefined' ? self : this, function (Importer) {
   'use strict';
 
   const KEY = 'gagyebu-calendar.v1';
@@ -49,117 +49,25 @@
       categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
       transactions: [],
       events: [],
-      settings: { warn: 0.15, alert: 0.3, lookback: 2 },
+      settings: { warn: 0.15, alert: 0.3, lookback: 2, currency: 'KRW' },
     };
   }
 
-  /* ---------- CSV ---------- */
-  function parseCSV(text) {
-    const rows = [];
-    let row = [];
-    let field = '';
-    let q = false;
-    text = text.replace(/^﻿/, '');
-    for (let i = 0; i < text.length; i++) {
-      const c = text[i];
-      if (q) {
-        if (c === '"') {
-          if (text[i + 1] === '"') {
-            field += '"';
-            i++;
-          } else q = false;
-        } else field += c;
-      } else if (c === '"') q = true;
-      else if (c === ',') {
-        row.push(field);
-        field = '';
-      } else if (c === '\n' || c === '\r') {
-        if (c === '\r' && text[i + 1] === '\n') i++;
-        row.push(field);
-        rows.push(row);
-        row = [];
-        field = '';
-      } else field += c;
-    }
-    if (field !== '' || row.length) {
-      row.push(field);
-      rows.push(row);
-    }
-    return rows.filter((r) => r.some((v) => v.trim() !== ''));
-  }
-
-  const csvCell = (v) => {
-    const s = v == null ? '' : String(v);
-    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-
-  const HEADER_ALIASES = {
-    date: ['날짜', '일자', '거래일', '거래일자', '사용일', 'date'],
-    type: ['구분', '유형', '수입/지출', 'type'],
-    amount: ['금액', '거래금액', '사용금액', 'amount'],
-    category: ['카테고리', '분류', '항목', 'category'],
-    memo: ['메모', '내용', '적요', '사용처', '가맹점', 'memo', 'description'],
-    tags: ['태그', 'tags'],
-    event: ['일정', '여행', 'event', 'trip'],
-  };
-
-  function normalizeDate(s) {
-    const m = String(s).trim().match(/(\d{4})[.\-/년\s]*(\d{1,2})[.\-/월\s]*(\d{1,2})/);
-    if (!m) return null;
-    return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
-  }
+  /* ---------- CSV (js/importer.js) ---------- */
+  const parseCSV = Importer.parseCSV;
+  const transactionsToCSV = Importer.transactionsToCSV;
 
   /** CSV 텍스트 → { transactions, newCategories, errors } (data는 변경하지 않음) */
-  function csvToTransactions(text, data) {
-    const rows = parseCSV(text);
-    if (!rows.length) return { transactions: [], newCategories: [], errors: ['빈 파일입니다.'] };
-    const header = rows[0].map((h) => h.trim().toLowerCase());
-    const col = {};
-    for (const [key, names] of Object.entries(HEADER_ALIASES)) {
-      col[key] = header.findIndex((h) => names.includes(h));
-    }
-    if (col.date < 0 || col.amount < 0) {
-      return { transactions: [], newCategories: [], errors: ['헤더에 "날짜"와 "금액" 열이 필요합니다.'] };
-    }
-    const known = new Set(data.categories.map((c) => c.name));
-    const eventByTitle = new Map(data.events.map((e) => [e.title, e.id]));
-    const newCategories = [];
-    const out = [];
-    const errors = [];
-    rows.slice(1).forEach((r, i) => {
-      const get = (k) => (col[k] >= 0 ? (r[col[k]] || '').trim() : '');
-      const date = normalizeDate(get('date'));
-      let amount = Number(get('amount').replace(/[^\d.-]/g, ''));
-      if (!date || !isFinite(amount) || amount === 0) {
-        errors.push(`${i + 2}행: 날짜 또는 금액을 읽을 수 없습니다.`);
-        return;
-      }
-      const typeRaw = get('type');
-      let type = /수입|입금|income/i.test(typeRaw) ? 'income' : 'expense';
-      if (!typeRaw && amount < 0) type = 'expense';
-      amount = Math.abs(amount);
-      const category = get('category') || (type === 'income' ? '기타수입' : '기타');
-      if (!known.has(category)) {
-        known.add(category);
-        newCategories.push({ name: category, type, recurring: false, color: PALETTE[(known.size + newCategories.length) % PALETTE.length] });
-      }
-      const tags = get('tags') ? get('tags').split(/[;|#]/).map((s) => s.trim()).filter(Boolean) : [];
-      out.push({ id: uid(), date, type, amount, category, memo: get('memo'), tags, eventId: eventByTitle.get(get('event')) || null });
-    });
-    return { transactions: out, newCategories, errors };
-  }
-
-  function transactionsToCSV(data) {
-    const evById = new Map(data.events.map((e) => [e.id, e.title]));
-    const lines = [['날짜', '구분', '금액', '카테고리', '메모', '태그', '일정'].join(',')];
-    for (const t of [...data.transactions].sort((a, b) => a.date.localeCompare(b.date))) {
-      lines.push(
-        [t.date, t.type === 'income' ? '수입' : '지출', t.amount, t.category, t.memo, (t.tags || []).join(';'), evById.get(t.eventId) || '']
-          .map(csvCell)
-          .join(',')
-      );
-    }
-    return '﻿' + lines.join('\n');
+  function csvToTransactions(text, data, opts = {}) {
+    const analysis = Importer.analyze(text, data);
+    const built = Importer.build(analysis, data, { uid, linkTrips: false, skipCardPayments: false, ...opts });
+    const known = data.categories.length;
+    return {
+      transactions: built.transactions,
+      newCategories: built.newCategories.map((c, i) => ({ ...c, color: PALETTE[(known + i) % PALETTE.length] })),
+      errors: analysis.errors,
+      analysis,
+    };
   }
 
   /* ---------- 저장소 ---------- */
@@ -421,12 +329,24 @@
       /* 가져오기/내보내기 */
       importCSV(text) {
         const res = csvToTransactions(text, this.data);
-        const stamp = now();
-        res.newCategories.forEach((c) => this.data.categories.push({ ...c, updatedAt: stamp }));
-        res.transactions.forEach((t) => (t.updatedAt = stamp));
-        this.data.transactions.push(...res.transactions);
-        if (res.transactions.length || res.newCategories.length) this.save();
+        this.addImported(res);
         return res;
+      },
+      /** 가져오기 미리보기에서 확정한 거래 추가 */
+      addImported({ transactions, newCategories }) {
+        const stamp = now();
+        (newCategories || []).forEach((c, i) => {
+          if (this.category(c.name)) return;
+          this.data.categories.push({ color: PALETTE[(this.data.categories.length + i) % PALETTE.length], ...c, updatedAt: stamp });
+          delete this.data.deleted.categories[c.name];
+        });
+        transactions.forEach((t) => {
+          t.id = t.id || uid();
+          t.updatedAt = stamp;
+        });
+        this.data.transactions.push(...transactions);
+        if (transactions.length || (newCategories || []).length) this.save();
+        return transactions.length;
       },
       exportCSV() {
         return transactionsToCSV(this.data);

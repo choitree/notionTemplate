@@ -12,6 +12,37 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  /* ---------- 통화 ---------- */
+  let CURRENCY = 'KRW';
+  const setCurrency = (c) => (CURRENCY = c === 'USD' ? 'USD' : 'KRW');
+  const getCurrency = () => CURRENCY;
+  /** 금액 표시: 12,500원 / $1,234.56 */
+  function money(n, cur = CURRENCY) {
+    const v = Number(n) || 0;
+    if (cur === 'USD') {
+      const s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return `${v < 0 ? '-' : ''}$${s}`;
+    }
+    return `${Math.round(v).toLocaleString('ko-KR')}원`;
+  }
+  /** 짧은 표시: 2730만(원) / $12.3k */
+  function compact(n, cur = CURRENCY, unit = true) {
+    const v = Number(n) || 0;
+    const a = Math.abs(v);
+    if (cur === 'USD') {
+      const sign = v < 0 ? '-' : '';
+      if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
+      if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(a >= 1e4 ? 0 : 1).replace(/\.0$/, '')}k`;
+      return `${sign}$${Math.round(a)}`;
+    }
+    const r = Math.round(v);
+    let s;
+    if (a >= 1e8) s = `${(r / 1e8).toFixed(1).replace(/\.0$/, '')}억`;
+    else if (a >= 1e4) s = `${(r / 1e4).toFixed(a >= 1e6 ? 0 : 1).replace(/\.0$/, '')}만`;
+    else s = r.toLocaleString('ko-KR');
+    return unit ? `${s}원` : s;
+  }
+
   const yearOf = (d) => Number(d.slice(0, 4));
   const monthOf = (d) => Number(d.slice(5, 7));
   const dayOf = (d) => Number(d.slice(8, 10));
@@ -223,7 +254,7 @@
 
   /** 사람이 읽을 수 있는 설명 문장 */
   function explain(r) {
-    const won = (n) => `${Math.round(n).toLocaleString('ko-KR')}원`;
+    const won = (n) => money(n);
     const pct = (x) => `${x >= 0 ? '+' : ''}${Math.round(x * 100)}%`;
     if (r.status === 'nodata') return `${r.month}월 ${r.category}: 이전 연도 데이터가 없어 비교할 수 없습니다.`;
     const lines = [];
@@ -320,6 +351,10 @@
   }
 
   return {
+    setCurrency,
+    getCurrency,
+    money,
+    compact,
     yearOf,
     monthOf,
     dayOf,

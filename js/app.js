@@ -1,4 +1,4 @@
-/* global Chart, Analytics, Store, Sample */
+/* global Chart, Analytics, Store, Sample, Importer, Xlsx */
 (function () {
   'use strict';
   const A = Analytics;
@@ -10,13 +10,9 @@
   const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
   const esc = (s) =>
     String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-  const won = (n) => `${Math.round(n || 0).toLocaleString('ko-KR')}원`;
-  const man = (n) => {
-    const v = Math.round(n || 0);
-    if (Math.abs(v) >= 100000000) return `${(v / 100000000).toFixed(1).replace(/\.0$/, '')}억`;
-    if (Math.abs(v) >= 10000) return `${(v / 10000).toFixed(Math.abs(v) >= 1000000 ? 0 : 1).replace(/\.0$/, '')}만`;
-    return v.toLocaleString('ko-KR');
-  };
+  const won = (n) => A.money(n);
+  const short = (n) => A.compact(n); // 2730만원 / $12k
+  const man = (n) => A.compact(n, undefined, false); // 축 눈금·칸 안 숫자 (원 단위 생략)
   const pct = (x, digits = 0) => (x == null || !isFinite(x) ? '–' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(digits)}%`);
   const pad = A.pad;
   const today = new Date();
@@ -181,6 +177,9 @@
   function render() {
     const { view, params } = parseHash();
     UI.view = VIEWS[view] ? view : 'dashboard';
+    A.setCurrency(data().settings.currency);
+    const mark = $('.brand-mark');
+    if (mark) mark.textContent = A.getCurrency() === 'USD' ? '$' : '₩';
     if (UI.view === 'search') UI.query = params.get('q') || '';
     $$('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === UI.view));
     destroyCharts();
@@ -253,15 +252,21 @@
     if (!prev) return `<div class="delta">${label}: 데이터 없음</div>`;
     const d = (cur - prev) / prev;
     const cls = d > 0 ? 'delta-up' : 'delta-down';
-    return `<div class="delta">${label} <span class="${cls}">${d > 0 ? '▲' : '▼'} ${pct(Math.abs(d)).replace('+', '')}</span> (${man(prev)}원)</div>`;
+    return `<div class="delta">${label} <span class="${cls}">${d > 0 ? '▲' : '▼'} ${pct(Math.abs(d)).replace('+', '')}</span> (${short(prev)})</div>`;
+  }
+  const isUSD = () => A.getCurrency() === 'USD';
+  const fmtInput = (n) => (isUSD() ? String(Math.round(n * 100) / 100) : Number(n).toLocaleString('ko-KR'));
+  function amtText(t) {
+    if (t.type === 'income') return `+${won(t.amount)}`;
+    return t.amount < 0 ? `+${won(-t.amount)}` : `-${won(t.amount)}`;
   }
   function txRow(t) {
     const ev = t.eventId ? Store.event(t.eventId) : null;
     return `<div class="tx" data-tx="${t.id}">
       <span class="dot" style="background:${esc(Store.color(t.category))}"></span>
       <span class="cat">${esc(t.category)}</span>
-      <span class="memo">${esc(t.memo || '')}${eventBadge(ev)}</span>
-      <span class="amt ${t.type}">${t.type === 'income' ? '+' : '-'}${won(t.amount)}</span>
+      <span class="memo">${esc(t.memo || '')}${t.type === 'expense' && t.amount < 0 ? ' <span class="badge plain">취소·환불</span>' : ''}${eventBadge(ev)}</span>
+      <span class="amt ${t.type}${t.type === 'expense' && t.amount < 0 ? ' refund' : ''}">${amtText(t)}</span>
     </div>`;
   }
   function txListGrouped(list) {
@@ -405,7 +410,7 @@
               ? flagged
                   .slice(0, 5)
                   .map(
-                    (r) => `<div class="alert-item">${badge(r.status)}<div><strong>${r.month}월 ${esc(r.category)}</strong> <span class="num">${won(r.actual)}</span> <span class="muted small">(예상 ${man(r.reference)}원, ${pct(r.diff)})</span><p>${esc(shortExplain(r))}</p></div></div>`
+                    (r) => `<div class="alert-item">${badge(r.status)}<div><strong>${r.month}월 ${esc(r.category)}</strong> <span class="num">${won(r.actual)}</span> <span class="muted small">(예상 ${short(r.reference)}, ${pct(r.diff)})</span><p>${esc(shortExplain(r))}</p></div></div>`
                   )
                   .join('')
               : `<div class="empty">${checks.some((c) => c.status !== 'nodata') ? '✓ 최근 고정비는 모두 정상 범위입니다.' : '비교할 이전 연도 데이터가 없습니다.'}</div>`
@@ -909,8 +914,8 @@
           <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px">
             <div class="stat"><div class="label">여행 횟수</div><div class="value num">${trips.length}회</div></div>
             <div class="stat"><div class="label">총 여행일</div><div class="value num">${A.sum(trips.map((r) => r.summary.days))}일</div></div>
-            <div class="stat"><div class="label">총 여행 지출</div><div class="value num">${man(A.sum(trips.map((r) => r.summary.total)))}원</div></div>
-            <div class="stat"><div class="label">1회 평균</div><div class="value num">${trips.length ? man(A.sum(trips.map((r) => r.summary.total)) / trips.length) + '원' : '–'}</div></div>
+            <div class="stat"><div class="label">총 여행 지출</div><div class="value num">${short(A.sum(trips.map((r) => r.summary.total)))}</div></div>
+            <div class="stat"><div class="label">1회 평균</div><div class="value num">${trips.length ? short(A.sum(trips.map((r) => r.summary.total)) / trips.length) : '–'}</div></div>
           </div>
         </div>
       </div>
@@ -1020,14 +1025,19 @@
       ${accountCard()}
       <div class="grid grid-2">
         <div class="card">
-          <h2>CSV 가져오기</h2>
-          <p class="hint">은행·카드 내역을 아래 열 이름으로 맞춰 저장한 CSV (UTF-8). 필수: 날짜, 금액</p>
-          <pre class="small" style="background:var(--surface-2);padding:10px;border-radius:8px;overflow-x:auto;margin:0 0 10px">날짜,구분,금액,카테고리,메모,태그,일정
-2025-01-20,지출,182000,가스비,도시가스 요금,,
-2025-07-21,지출,96000,교통,간사이 스루패스,해외,오사카 여행
-2025-01-25,수입,4350000,급여,월급,,</pre>
-          <p class="muted small">구분이 없으면 지출로, 금액이 음수여도 지출로 처리합니다. 없는 카테고리는 자동 추가됩니다. "일정" 열에 기존 일정 이름을 쓰면 자동 연결됩니다.</p>
-          <div class="row"><input type="file" id="csv-file" accept=".csv,text/csv" /><button class="btn" id="csv-export">CSV 내보내기</button></div>
+          <h2>거래 내역 가져오기</h2>
+          <p class="hint">미국 카드사(American Express, Chase, Capital One, Citi, Discover, Apple Card 등)·은행 계좌, 국내 카드사·은행 파일을 자동으로 알아봅니다</p>
+          <ol class="small" style="margin:0 0 10px;padding-left:18px;color:var(--ink-2)">
+            <li>카드사·은행 웹사이트의 <b>Activity / Statements → Download</b>에서 <b>CSV</b> 또는 <b>Excel(.xlsx)</b>로 내려받습니다.</li>
+            <li>아래에서 파일을 고르면 <b>미리보기</b>가 열립니다. 가맹점별 카테고리를 확인·수정한 뒤 가져오세요. 여러 파일을 한 번에 골라도 됩니다.</li>
+          </ol>
+          <ul class="small muted" style="margin:0 0 10px;padding-left:18px">
+            <li>CSV·엑셀(.xlsx)·HTML 표 형식 .xls 지원 · 위쪽 안내 문구와 합계 행은 자동으로 건너뜀</li>
+            <li>카드사마다 다른 금액 부호(구매가 + 또는 -)를 파일에서 판별 · 카드 대금 납부(Payment)는 제외 · 환불은 지출에서 차감</li>
+            <li>은행 계좌의 카드 대금 출금은 기본 제외(카드 내역과 이중 계산 방지) · 승인 대기(Pending) 건은 건너뜀</li>
+            <li>이미 가져온 거래는 중복으로 건너뜀 · 한 번 고친 가맹점 카테고리는 다음부터 자동 적용</li>
+          </ul>
+          <div class="row"><label class="btn primary">파일 선택<input type="file" id="csv-file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" multiple hidden /></label><button class="btn" id="csv-export">CSV 내보내기</button></div>
         </div>
         <div class="card">
           <h2>백업 · 초기화</h2>
@@ -1041,6 +1051,9 @@
             <label class="small">경고 <input type="number" id="set-alert" min="1" max="300" value="${Math.round(s.alert * 100)}" style="width:70px" />%</label>
             <label class="small">비교 연도 <select id="set-lookback">${[1, 2, 3].map((n) => `<option ${n === s.lookback ? 'selected' : ''} value="${n}">${n}년</option>`).join('')}</select></label>
           </div>
+          <h2 style="margin-top:20px">통화</h2>
+          <p class="hint">금액 표시 단위. 바꿔도 금액을 환산하지는 않습니다</p>
+          <select id="set-currency"><option value="KRW" ${s.currency !== 'USD' ? 'selected' : ''}>원 (KRW)</option><option value="USD" ${s.currency === 'USD' ? 'selected' : ''}>달러 (USD, $)</option></select>
         </div>
       </div>
       <div class="card mt">
@@ -1062,12 +1075,21 @@
 
     bindAccountCard(root);
     $('#csv-file').onchange = async (e) => {
-      const f = e.target.files[0];
-      if (!f) return;
-      const text = await f.text();
-      const res = Store.importCSV(text);
-      alert(`${res.transactions.length}건 가져옴${res.newCategories.length ? `, 새 카테고리 ${res.newCategories.length}개` : ''}${res.errors.length ? `\n\n건너뜀 ${res.errors.length}건:\n${res.errors.slice(0, 10).join('\n')}` : ''}`);
-      rerender();
+      const files = [...e.target.files];
+      e.target.value = '';
+      if (!files.length) return;
+      try {
+        // 엑셀(.xlsx)·HTML 표는 행 배열로, CSV는 글자로 읽어 같은 분석기로 넘김
+        const inputs = await Promise.all(
+          files.map(async (f) => {
+            const r = Xlsx.read(await f.arrayBuffer(), Importer.decode);
+            return r.rows || r.text;
+          })
+        );
+        openImportPreview(files.map((f) => f.name), inputs);
+      } catch (err) {
+        alert(`파일을 읽지 못했습니다: ${err.message}`);
+      }
     };
     $('#csv-export').onclick = () => download(`가계부_${TODAY}.csv`, Store.exportCSV(), 'text/csv;charset=utf-8');
     $('#json-export').onclick = () => download(`가계부_백업_${TODAY}.json`, Store.exportJSON(), 'application/json');
@@ -1104,6 +1126,11 @@
       toast('기준을 저장했습니다.');
     };
     ['#set-warn', '#set-alert', '#set-lookback'].forEach((sel) => ($(sel).onchange = saveSettings));
+    $('#set-currency').onchange = (e) => {
+      Store.updateSettings({ currency: e.target.value });
+      toast(`통화를 ${e.target.value === 'USD' ? '달러($)' : '원'}로 바꿨습니다.`);
+      rerender();
+    };
     $('#cat-add').onclick = () => {
       const name = $('#cat-name').value.trim();
       if (!name) return;
@@ -1165,7 +1192,7 @@
         <div class="seg" id="tx-type"><button type="button" data-t="expense" class="${t.type === 'expense' ? 'on' : ''}">지출</button><button type="button" data-t="income" class="${t.type === 'income' ? 'on' : ''}">수입</button></div>
         <div class="two">
           <label>날짜<input type="date" name="date" value="${esc(t.date)}" required /></label>
-          <label>금액(원)<input type="text" inputmode="numeric" name="amount" value="${t.amount ? Number(t.amount).toLocaleString('ko-KR') : ''}" placeholder="0" required /></label>
+          <label>금액(${isUSD() ? '$' : '원'})${t.amount < 0 ? ' <span class="badge plain">취소·환불</span>' : ''}<input type="text" inputmode="${isUSD() ? 'decimal' : 'numeric'}" name="amount" value="${t.amount ? fmtInput(Math.abs(Number(t.amount))) : ''}" placeholder="${isUSD() ? '0.00' : '0'}" required /></label>
         </div>
         <div class="two">
           <label>카테고리<select name="category">${catOptions(t.type, t.category)}</select></label>
@@ -1188,6 +1215,13 @@
       })
     );
     form.amount.addEventListener('input', () => {
+      if (isUSD()) {
+        // 숫자와 소수점 하나, 소수 둘째 자리까지
+        const v = form.amount.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
+        const [i, f] = v.split('.');
+        form.amount.value = f != null ? `${i}.${f.slice(0, 2)}` : i;
+        return;
+      }
       const digits = form.amount.value.replace(/[^\d]/g, '');
       form.amount.value = digits ? Number(digits).toLocaleString('ko-KR') : '';
     });
@@ -1219,7 +1253,8 @@
       };
     form.addEventListener('submit', (e) => {
       e.preventDefault();
-      const amount = Number(form.amount.value.replace(/[^\d]/g, ''));
+      const refund = isEdit && t.type === 'expense' && t.amount < 0 && type === 'expense';
+      const amount = (Math.round(Number(form.amount.value.replace(isUSD() ? /[^\d.]/g : /[^\d]/g, '')) * 100) / 100) * (refund ? -1 : 1);
       if (!amount) return toast('금액을 입력하세요.');
       if (form.category.value === '__new') return toast('카테고리를 선택하세요.');
       Store.upsertTransaction({
@@ -1299,6 +1334,147 @@
       toast(`저장했습니다${linked ? ` · 거래 ${linked}건 연결` : ''}.`);
       rerender();
     });
+  }
+
+  /** 거래 내역 가져오기 미리보기 */
+  function openImportPreview(names, texts) {
+    // 여러 파일은 하나씩 분석해 합침 (파일 사이 중복도 걸러지도록 순서대로 누적)
+    const acc = { rows: [], merchants: new Map(), cardPayments: [], payments: [], pending: 0, errors: [], duplicates: 0, formats: new Set(), currencies: new Set(), period: null };
+    const probe = { ...data(), transactions: [...data().transactions] };
+    texts.forEach((text, i) => {
+      const a = Importer.analyze(text, probe);
+      const tag = names.length > 1 ? `[${names[i]}] ` : '';
+      a.errors.forEach((er) => acc.errors.push(tag + er));
+      if (!a.format) return;
+      acc.formats.add(a.formatLabel);
+      acc.currencies.add(a.currency);
+      acc.payments.push(...a.payments);
+      acc.pending += a.pending;
+      acc.duplicates += a.duplicates;
+      acc.rows.push(...a.rows);
+      acc.cardPayments.push(...a.cardPayments);
+      a.merchants.forEach((m) => {
+        const cur = acc.merchants.get(m.key);
+        if (cur) {
+          cur.count += m.count;
+          cur.total += m.total;
+        } else acc.merchants.set(m.key, { ...m });
+      });
+      probe.transactions.push(...a.rows);
+      if (a.period) {
+        acc.period = acc.period
+          ? { start: a.period.start < acc.period.start ? a.period.start : acc.period.start, end: a.period.end > acc.period.end ? a.period.end : acc.period.end }
+          : a.period;
+      }
+    });
+    const analysis = { ...acc, merchants: [...acc.merchants.values()].sort((a, b) => b.count - a.count) };
+    // 통화: 파일이 달러면 달러로 표시. 가계부 통화와 다르면 바꿀지 묻기
+    const ledgerCur = data().settings.currency || 'KRW';
+    const fileCur = analysis.currencies.has('USD') ? 'USD' : analysis.currencies.has('KRW') ? 'KRW' : ledgerCur;
+    const curName = (c) => (c === 'USD' ? '달러($)' : '원');
+    const fmt = (n) => A.money(n, fileCur);
+    const curMismatch = fileCur !== ledgerCur;
+    const ledgerEmpty = !data().transactions.length;
+    const hasTrips = data().events.some((e) => e.kind === 'trip');
+    const catOpts = (type, cur) =>
+      data()
+        .categories.filter((c) => c.type === type)
+        .map((c) => `<option ${c.name === cur ? 'selected' : ''}>${esc(c.name)}</option>`)
+        .join('') + (data().categories.some((c) => c.name === cur) ? '' : `<option selected>${esc(cur)}</option>`);
+    const SRC = { history: '이전 분류', rule: '자동', issuer: '카드사 분류', none: '미분류' };
+
+    const summary = () => {
+      const skipCards = $('#imp-skipcard') ? $('#imp-skipcard').checked : true;
+      const rows = analysis.rows.filter((r) => !(skipCards && analysis.cardPayments.includes(r)));
+      const exp = A.sum(rows.filter((r) => r.type === 'expense').map((r) => r.amount));
+      const inc = A.sum(rows.filter((r) => r.type === 'income').map((r) => r.amount));
+      const refunds = rows.filter((r) => r.refund).length;
+      return { rows, exp, inc, refunds };
+    };
+    const s0 = summary();
+    const unclassified = analysis.merchants.filter((m) => m.category === '기타').length;
+    const m = openModal(
+      `
+      <div class="card-head"><div><h2 style="margin:0">가져오기 미리보기</h2>
+        <div class="muted small">${esc(names.join(', '))} · ${esc([...analysis.formats].join(', ') || '알 수 없는 형식')}${analysis.period ? ` · ${fmtRange(analysis.period.start, analysis.period.end)}` : ''}</div></div>
+        <button class="icon-btn" id="imp-close" aria-label="닫기">✕</button></div>
+      ${
+        analysis.rows.length
+          ? `<div class="grid grid-4" style="margin:12px 0" id="imp-stats"></div>
+      <div class="small" style="display:grid;gap:6px;margin-bottom:12px">
+        ${
+          curMismatch
+            ? `<label class="row" style="gap:6px;align-items:flex-start;padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--warning) 16%, transparent)"><input type="checkbox" id="imp-cur" ${ledgerEmpty ? 'checked' : ''} style="margin-top:3px" /> <span>이 파일은 <b>${curName(fileCur)}</b> 금액입니다. 가계부 통화를 ${curName(fileCur)}로 바꾸기${
+                ledgerEmpty ? '' : ` <span class="muted">— 기존 거래 ${data().transactions.length.toLocaleString()}건은 ${curName(ledgerCur)} 금액이라, 바꾸면 숫자는 그대로 두고 단위만 바뀝니다(환산 안 함)</span>`
+              }</span></label>`
+            : ''
+        }
+        ${analysis.payments.length ? `<div>⇄ 카드 대금 납부 <b>${analysis.payments.length}건</b>(${fmt(A.sum(analysis.payments.map((r) => r.amount)))})은 지출이 아니라서 제외합니다.</div>` : ''}
+        ${analysis.pending ? `<div>⏳ 승인 대기(Pending) <b>${analysis.pending}건</b>은 확정된 뒤 다시 나오므로 건너뜁니다.</div>` : ''}
+        ${analysis.duplicates ? `<div>↺ 이미 있는 거래 <b>${analysis.duplicates}건</b>은 중복이라 건너뜁니다.</div>` : ''}
+        ${analysis.cardPayments.length ? `<label class="row" style="gap:6px"><input type="checkbox" id="imp-skipcard" checked /> 계좌의 카드 대금 출금 <b>${analysis.cardPayments.length}건</b>(${fmt(A.sum(analysis.cardPayments.map((r) => r.amount)))}) 제외 — 카드 내역을 따로 가져오면 이중으로 계산됩니다</label>` : ''}
+        ${hasTrips ? `<label class="row" style="gap:6px"><input type="checkbox" id="imp-trips" checked /> 여행 기간에 쓴 지출은 그 여행에 자동 연결</label>` : ''}
+        ${analysis.errors.length ? `<details><summary>읽지 못한 행 ${analysis.errors.length}개 (안내 문구·빈 행 등)</summary><div class="muted" style="max-height:120px;overflow:auto">${analysis.errors.slice(0, 50).map(esc).join('<br>')}</div></details>` : ''}
+      </div>
+      ${
+        analysis.merchants.length
+          ? `<h2 style="font-size:14px;margin:0 0 2px">가맹점별 카테고리 <span class="muted small">${analysis.merchants.length}곳${unclassified ? ` · 미분류 ${unclassified}곳` : ''}</span></h2>
+      <p class="hint" style="margin:0 0 6px">바꾼 카테고리는 기억해 두었다가 다음 가져오기에 자동으로 적용합니다</p>
+      <div class="table-wrap" style="max-height:320px;overflow:auto;border:1px solid var(--grid);border-radius:8px">
+        <table class="small"><thead><tr><th>가맹점·내용</th><th class="r">건수</th><th class="r">금액</th><th>카테고리</th></tr></thead>
+        <tbody>${analysis.merchants
+          .map(
+            (mm, i) => `<tr><td style="white-space:normal;min-width:140px">${esc(mm.memo)} ${mm.type === 'income' ? '<span class="badge plain">수입</span>' : ''}${
+              mm.issuerCategory ? `<div class="muted" style="font-size:11px">${esc(mm.issuerCategory)}</div>` : ''
+            }</td><td class="r">${mm.count}</td><td class="r">${fmt(mm.total)}</td>
+            <td><select data-mi="${i}" aria-label="${esc(mm.memo)} 카테고리">${catOpts(mm.type, mm.category)}</select> <span class="muted" style="font-size:11px">${SRC[mm.source] || ''}</span></td></tr>`
+          )
+          .join('')}</tbody></table></div>`
+          : ''
+      }`
+          : `<div class="empty">가져올 거래가 없습니다.${analysis.duplicates ? ` (중복 ${analysis.duplicates}건)` : ''}${analysis.payments.length ? ` (카드 대금 납부 ${analysis.payments.length}건 제외)` : ''}</div>${
+              analysis.errors.length ? `<div class="small muted" style="max-height:160px;overflow:auto">${analysis.errors.slice(0, 20).map(esc).join('<br>')}</div>` : ''
+            }`
+      }
+      <div class="modal-foot"><button class="btn" id="imp-cancel">취소</button>${analysis.rows.length ? `<button class="btn primary" id="imp-go">${s0.rows.length}건 가져오기</button>` : ''}</div>`,
+      { wide: true }
+    );
+    const paint = () => {
+      const s = summary();
+      const box = $('#imp-stats', m);
+      if (box)
+        box.innerHTML = `
+        <div class="stat"><div class="label">가져올 거래</div><div class="value num" style="font-size:20px">${s.rows.length}건</div></div>
+        <div class="stat"><div class="label">지출</div><div class="value num" style="font-size:20px">${fmt(s.exp)}</div></div>
+        <div class="stat"><div class="label">수입</div><div class="value num" style="font-size:20px">${fmt(s.inc)}</div></div>
+        <div class="stat"><div class="label">취소·환불</div><div class="value num" style="font-size:20px">${s.refunds}건</div></div>`;
+      const btn = $('#imp-go', m);
+      if (btn) btn.textContent = `${s.rows.length}건 가져오기`;
+    };
+    paint();
+    if ($('#imp-skipcard', m)) $('#imp-skipcard', m).onchange = paint;
+    $('#imp-close', m).onclick = closeModal;
+    $('#imp-cancel', m).onclick = closeModal;
+    const goBtn = $('#imp-go', m);
+    if (goBtn)
+      goBtn.onclick = () => {
+        const categories = {};
+        $$('[data-mi]', m).forEach((sel) => (categories[analysis.merchants[Number(sel.dataset.mi)].key] = sel.value));
+        const built = Importer.build(analysis, data(), {
+          categories,
+          skipCardPayments: $('#imp-skipcard', m) ? $('#imp-skipcard', m).checked : true,
+          linkTrips: $('#imp-trips', m) ? $('#imp-trips', m).checked : false,
+          uid: Store.uid,
+        });
+        if ($('#imp-cur', m) && $('#imp-cur', m).checked) Store.updateSettings({ currency: fileCur });
+        const n = Store.addImported(built);
+        closeModal();
+        const linked = built.transactions.filter((t) => t.eventId).length;
+        toast(`${n}건을 가져왔습니다${linked ? ` · 여행 연결 ${linked}건` : ''}.`);
+        if (analysis.period) UI.ym = { y: A.yearOf(analysis.period.end), m: A.monthOf(analysis.period.end) };
+        go('ledger');
+        rerender();
+      };
   }
 
   function openEventDetail(id) {
