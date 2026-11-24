@@ -46,29 +46,48 @@ python3 -m http.server 8000   # → http://localhost:8000
 
 main 브랜치에 푸시하면 `.github/workflows/pages.yml`이 테스트를 돌린 뒤 GitHub Pages로 배포합니다(저장소 Settings → Pages → Source를 **GitHub Actions**로 설정 필요). 휴대폰에서도 열 수 있지만 데이터는 기기·브라우저마다 따로 저장됩니다.
 
-### 거래 내역 가져오기 (카드사 · 은행 · CSV)
+### 거래 내역 가져오기 (미국 카드사 · 은행 · 엑셀 · CSV)
 
 **데이터 → 거래 내역 가져오기 → 파일 선택**에서 파일을 고르면 미리보기가 열립니다. 여러 파일을 한 번에 골라도 됩니다.
 
-1. 카드사·은행 홈페이지나 앱에서 **이용내역 / 거래내역을 CSV로** 내려받습니다.
-   엑셀(.xls/.xlsx)만 제공되면 엑셀에서 *다른 이름으로 저장 → CSV(쉼표로 분리)* 로 바꿔 주세요.
-2. 미리보기에서 형식(카드 이용내역 / 은행 거래내역 / 가계부 CSV), 기간, 건수, 지출·수입 합계를 확인합니다.
+1. 카드사·은행 웹사이트의 **Activity / Statements → Download**에서 **CSV** 또는 **Excel(.xlsx)** 로 내려받습니다.
+2. 미리보기에서 형식(카드 이용내역 / 은행 거래내역), 기간, 건수, 지출·수입 합계, 제외되는 항목을 확인합니다.
 3. **가맹점별 카테고리**를 확인하고 필요하면 고친 뒤 가져옵니다.
 
-자동으로 처리하는 것:
+지원하도록 맞춘 형식 (공개 안내·도구 문서에 나오는 열 구성 기준):
+
+| 카드사·은행 | 특징 |
+|---|---|
+| **American Express** | CSV·Excel. `Date, Description, Amount, … Category`. 구매 +, 납부·환불 − |
+| **Chase** 카드 | `Transaction Date, Post Date, Description, Category, Type, Amount, Memo`. 구매 − |
+| **Capital One** | `Transaction Date, Posted Date, Card No., Description, Category, Debit, Credit` |
+| **Citi** | `Status, Date, Description, Debit, Credit` (Pending 건은 건너뜀) |
+| **Discover** | `Trans. Date, Post Date, Description, Amount, Category` |
+| **Apple Card** | `Transaction Date, …, Merchant, Category, Type, Amount (USD)` |
+| **Bank of America** 계좌 | 위쪽 요약 행 + `Date, Description, Amount, Running Bal.` |
+| **Wells Fargo** 계좌 | 헤더 없는 5열 파일 |
+| 국내 카드사·은행 | `이용일자/이용금액/가맹점명`, `출금액/입금액` 등, EUC-KR |
+
+카드사가 형식을 바꾸는 일이 잦아서, 회사별로 고정하지 않고 **열 이름과 내용으로 판별**합니다:
 
 | 항목 | 동작 |
 |---|---|
-| 인코딩 | EUC-KR(CP949)·UTF-8 자동 판별 |
-| 헤더 위치 | 상단의 조회기간·안내 문구를 건너뛰고 `이용일자`·`이용금액` 같은 열 이름이 있는 행을 찾음 |
-| 열 이름 | 날짜: `이용일자/승인일자/거래일시/매출일자…`, 금액: `이용금액/승인금액/거래금액…` (해외·현지 금액, 잔액, 포인트 열은 제외), 내용: `가맹점명/이용가맹점/적요/내용…` |
-| 카드 취소 | `승인구분/취소여부`에 "취소"가 있거나 금액이 음수면 **환불**(그 달 지출에서 차감, `취소` 태그) |
-| 은행 | `출금액/입금액` 열 → 지출/수입. 금액 하나에 부호로 표시하는 파일도 지원 |
-| 카드대금 | 은행 내역의 카드대금 출금은 기본으로 제외 (카드 내역과 이중 계산 방지, 미리보기에서 끌 수 있음) |
-| 중복 | 이미 있는 거래와 날짜·구분·금액·내용이 같으면 건너뜀 → 같은 달 파일을 다시 가져와도 안전 |
-| 카테고리 | 가맹점 이름으로 추측(주유소→주유비, 도시가스→가스비, 스타벅스→외식/카페 …). **한 번 고친 가맹점은 다음부터 그 카테고리로** |
+| 파일 | CSV(쉼표·탭·세미콜론, UTF-8·EUC-KR), 엑셀 `.xlsx`, HTML 표로 된 `.xls`. 옛 바이너리 `.xls`(Excel 97-2003)는 `.xlsx`나 CSV로 저장해 달라고 안내 |
+| 헤더 | 위쪽의 계정·기간 안내 행을 건너뛰고 열 이름 행을 찾음. 헤더가 없는 파일도 날짜·금액 열을 추측 |
+| 날짜 | `11/03/2026`, `1/5/26`, `Nov 3, 2026`, `2026-11-03`, `2026.11.03`, 엑셀 날짜 셀 |
+| 금액 부호 | 카드사마다 구매가 + 또는 −로 다름 → `Type` 열(Sale/Purchase/Debit)이나 다수 부호로 판별 |
+| 카드 대금 납부 | `Payment`, `AUTOPAY PAYMENT - THANK YOU` 등은 지출이 아니므로 제외 |
+| 환불·반품 | 지출에서 차감 (음수 지출, `취소` 태그) |
+| 은행 계좌 | 출금 = 지출, 입금 = 수입(급여 자동 분류). **카드 대금 출금**(AMEX ACH PMT, CHASE CREDIT CRD AUTOPAY …)은 카드 내역과 이중 계산되지 않게 기본 제외 |
+| 승인 대기 | `Status: Pending` 건은 확정 뒤 다시 나오므로 건너뜀 |
+| 중복 | 이미 있는 거래와 날짜·구분·금액·내용이 같으면 건너뜀 → 겹치는 기간을 다시 가져와도 안전 |
+| 카테고리 | ① 이전에 직접 고른 가맹점 → ② 가맹점 이름 규칙(Shell→주유비, Whole Foods→식비, PG&E→전기비, Verizon→통신비 …) → ③ 카드사 분류(`Restaurant`, `Groceries`, `Travel-Airline` …) → ④ 기타. 매장 번호가 달라도(`STARBUCKS STORE 05812`, `#11234`) 같은 가맹점으로 묶어 기억 |
 | 여행 | 여행 기간에 쓴 지출은 그 여행에 자동 연결 (고정비 제외, 주유비 포함) |
-| 합계·소계 행 | 자동으로 건너뜀 |
+| 통화 | 미국 파일이면 달러로 표시하고, 가계부 통화가 원이면 달러로 바꿀지 물음 |
+
+### 통화
+
+**데이터 → 통화**에서 원(KRW) / 달러(USD)를 고릅니다. 금액 표시($1,234.56)·입력(소수 둘째 자리)이 바뀌며, 금액을 환산하지는 않습니다. 한 가계부에는 한 통화만 쓰는 것을 권장합니다.
 
 이 앱의 CSV 형식(내보내기와 같음):
 
@@ -79,7 +98,7 @@ main 브랜치에 푸시하면 `.github/workflows/pages.yml`이 테스트를 돌
 2025-01-25,수입,4350000,급여,월급,,
 ```
 
-카드사·은행마다 파일 모양이 조금씩 다릅니다. 가져오기가 안 되는 파일이 있으면 **열 이름이 있는 첫 줄**만 알려 주세요 (거래 내용은 필요 없습니다).
+가져오기가 안 되는 파일이 있으면 **열 이름이 있는 첫 줄**만 알려 주세요 (거래 내용은 필요 없습니다).
 
 ### 여행 지출 연결
 
@@ -115,14 +134,15 @@ main 브랜치에 푸시하면 `.github/workflows/pages.yml`이 테스트를 돌
 index.html
 css/style.css
 js/analytics.js   분석 로직 (월·연 합계, 고정비 판정, 일정 요약, 검색) — 순수 함수
-js/importer.js    거래 내역 가져오기 (카드사·은행 CSV 형식 판별, 인코딩, 중복, 카테고리 추측)
+js/importer.js    거래 내역 가져오기 (미국·국내 카드사·은행 형식 판별, 금액 부호, 중복, 카테고리 추측)
+js/xlsx.js        엑셀(.xlsx)·HTML 표 읽기
 js/store.js       저장소 (localStorage, 사용자별 캐시, JSON 백업)
 js/sync.js        로그인·클라우드 동기화 (Supabase, 기기 간 변경 합치기)
 js/config.js      Supabase 주소·공개 키 (비우면 로그인 꺼짐)
 supabase/         데이터베이스 스키마·보안 규칙
 js/sample.js      샘플 데이터 생성기
 js/app.js         화면 (대시보드·가계부·캘린더·고정비·여행·검색·데이터)
-js/vendor/        Chart.js 4.4.1 (MIT), supabase-js 2.118.0 (MIT)
+js/vendor/        Chart.js 4.4.1 (MIT), supabase-js 2.118.0 (MIT), fflate 0.8.2 (MIT, zip 해제)
 tests/            node --test tests/*.test.js
 ```
 

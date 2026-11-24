@@ -49,7 +49,7 @@
       categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
       transactions: [],
       events: [],
-      settings: { warn: 0.15, alert: 0.3, lookback: 2 },
+      settings: { warn: 0.15, alert: 0.3, lookback: 2, currency: 'KRW' },
     };
   }
 
