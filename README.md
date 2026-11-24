@@ -83,3 +83,7 @@ tests/            node --test tests/*.test.js
 ```bash
 node --test tests/*.test.js
 ```
+
+## Claude Code 설정
+
+`.claude/settings.json`에 [ECC](https://github.com/affaan-m/ECC) 플러그인(`ecc@ecc`)이 등록되어 있어, 이 저장소로 여는 Claude Code 세션에서 ECC의 에이전트·스킬·명령·훅이 자동으로 로드됩니다.
